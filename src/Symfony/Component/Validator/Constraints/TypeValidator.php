@@ -13,42 +13,43 @@ namespace Symfony\Component\Validator\Constraints;
 
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\ConstraintValidator;
+use Symfony\Component\Validator\Exception\UnexpectedTypeException;
 
 /**
- * @api
+ * @author Bernhard Schussek <bschussek@gmail.com>
  */
 class TypeValidator extends ConstraintValidator
 {
     /**
-     * Checks if the passed value is valid.
-     *
-     * @param mixed      $value      The value that should be validated
-     * @param Constraint $constraint The constrain for the validation
-     *
-     * @return Boolean Whether or not the value is valid
-     *
-     * @api
+     * {@inheritdoc}
      */
-    public function isValid($value, Constraint $constraint)
+    public function validate($value, Constraint $constraint)
     {
+        if (!$constraint instanceof Type) {
+            throw new UnexpectedTypeException($constraint, __NAMESPACE__.'\Type');
+        }
+
         if (null === $value) {
-            return true;
+            return;
         }
 
-        $type = $constraint->type == 'boolean' ? 'bool' : $constraint->type;
-        $function = 'is_'.$type;
+        $type = strtolower($constraint->type);
+        $type = $type == 'boolean' ? 'bool' : $constraint->type;
+        $isFunction = 'is_'.$type;
+        $ctypeFunction = 'ctype_'.$type;
 
-        if (function_exists($function) && call_user_func($function, $value)) {
-            return true;
-        } else if ($value instanceof $constraint->type) {
-            return true;
+        if (function_exists($isFunction) && $isFunction($value)) {
+            return;
+        } elseif (function_exists($ctypeFunction) && $ctypeFunction($value)) {
+            return;
+        } elseif ($value instanceof $constraint->type) {
+            return;
         }
 
-        $this->setMessage($constraint->message, array(
-            '{{ value }}' => is_object($value) ? get_class($value) : (string)$value,
-            '{{ type }}'  => $constraint->type,
-        ));
-
-        return false;
+        $this->context->buildViolation($constraint->message)
+            ->setParameter('{{ value }}', $this->formatValue($value))
+            ->setParameter('{{ type }}', $constraint->type)
+            ->setCode(Type::INVALID_TYPE_ERROR)
+            ->addViolation();
     }
 }

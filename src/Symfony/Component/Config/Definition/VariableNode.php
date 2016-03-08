@@ -12,12 +12,11 @@
 namespace Symfony\Component\Config\Definition;
 
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
-use Symfony\Component\Config\Definition\Builder\NodeDefinition;
 
 /**
- * This node represents a variable value in the config tree.
+ * This node represents a value of variable type in the config tree.
  *
- * This node is intended for arbitrary variables.
+ * This node is intended for values of arbitrary type.
  * Any PHP type is accepted as a value.
  *
  * @author Jeremy Mikola <jmikola@gmail.com>
@@ -29,7 +28,7 @@ class VariableNode extends BaseNode implements PrototypeNodeInterface
     protected $allowEmptyValue = true;
 
     /**
-     * {@inheritDoc}
+     * {@inheritdoc}
      */
     public function setDefaultValue($value)
     {
@@ -38,7 +37,7 @@ class VariableNode extends BaseNode implements PrototypeNodeInterface
     }
 
     /**
-     * {@inheritDoc}
+     * {@inheritdoc}
      */
     public function hasDefaultValue()
     {
@@ -46,25 +45,27 @@ class VariableNode extends BaseNode implements PrototypeNodeInterface
     }
 
     /**
-     * {@inheritDoc}
+     * {@inheritdoc}
      */
     public function getDefaultValue()
     {
-        return $this->defaultValue instanceof \Closure ? call_user_func($this->defaultValue) : $this->defaultValue;
+        $v = $this->defaultValue;
+
+        return $v instanceof \Closure ? $v() : $v;
     }
 
     /**
      * Sets if this node is allowed to have an empty value.
      *
-     * @param Boolean $boolean True if this entity will accept empty values.
+     * @param bool $boolean True if this entity will accept empty values.
      */
     public function setAllowEmptyValue($boolean)
     {
-        $this->allowEmptyValue = (Boolean) $boolean;
+        $this->allowEmptyValue = (bool) $boolean;
     }
 
     /**
-     * {@inheritDoc}
+     * {@inheritdoc}
      */
     public function setName($name)
     {
@@ -72,23 +73,26 @@ class VariableNode extends BaseNode implements PrototypeNodeInterface
     }
 
     /**
-     * {@inheritDoc}
+     * {@inheritdoc}
      */
     protected function validateType($value)
     {
     }
 
     /**
-     * {@inheritDoc}
+     * {@inheritdoc}
      */
     protected function finalizeValue($value)
     {
-        if (!$this->allowEmptyValue && empty($value)) {
+        if (!$this->allowEmptyValue && $this->isValueEmpty($value)) {
             $ex = new InvalidConfigurationException(sprintf(
                 'The path "%s" cannot contain an empty value, but got %s.',
                 $this->getPath(),
                 json_encode($value)
             ));
+            if ($hint = $this->getInfo()) {
+                $ex->addHint($hint);
+            }
             $ex->setPath($this->getPath());
 
             throw $ex;
@@ -98,7 +102,7 @@ class VariableNode extends BaseNode implements PrototypeNodeInterface
     }
 
     /**
-     * {@inheritDoc}
+     * {@inheritdoc}
      */
     protected function normalizeValue($value)
     {
@@ -106,10 +110,26 @@ class VariableNode extends BaseNode implements PrototypeNodeInterface
     }
 
     /**
-     * {@inheritDoc}
+     * {@inheritdoc}
      */
     protected function mergeValues($leftSide, $rightSide)
     {
         return $rightSide;
+    }
+
+    /**
+     * Evaluates if the given value is to be treated as empty.
+     *
+     * By default, PHP's empty() function is used to test for emptiness. This
+     * method may be overridden by subtypes to better match their understanding
+     * of empty data.
+     *
+     * @param mixed $value
+     *
+     * @return bool
+     */
+    protected function isValueEmpty($value)
+    {
+        return empty($value);
     }
 }

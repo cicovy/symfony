@@ -12,47 +12,52 @@
 namespace Symfony\Bundle\FrameworkBundle\Tests\Templating\Helper;
 
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Session;
-use Symfony\Component\HttpFoundation\SessionStorage\ArraySessionStorage;
+use Symfony\Component\HttpFoundation\RequestStack;
+use Symfony\Component\HttpFoundation\Session\Session;
+use Symfony\Component\HttpFoundation\Session\Storage\MockArraySessionStorage;
 use Symfony\Bundle\FrameworkBundle\Templating\Helper\SessionHelper;
 
 class SessionHelperTest extends \PHPUnit_Framework_TestCase
 {
-    protected $request;
+    protected $requestStack;
 
-    public function setUp()
+    protected function setUp()
     {
-        $this->request = new Request();
+        $request = new Request();
 
-        $session = new Session(new ArraySessionStorage());
+        $session = new Session(new MockArraySessionStorage());
         $session->set('foobar', 'bar');
-        $session->setFlash('foo', 'bar');
+        $session->getFlashBag()->set('notice', 'bar');
 
-        $this->request->setSession($session);
+        $request->setSession($session);
+
+        $this->requestStack = new RequestStack();
+        $this->requestStack->push($request);
     }
 
     protected function tearDown()
     {
-        $this->request = null;
+        $this->requestStack = null;
     }
 
     public function testFlash()
     {
-        $helper = new SessionHelper($this->request);
+        $helper = new SessionHelper($this->requestStack);
 
-        $this->assertTrue($helper->hasFlash('foo'));
+        $this->assertTrue($helper->hasFlash('notice'));
 
-        $this->assertEquals('bar', $helper->getFlash('foo'));
-        $this->assertEquals('foo', $helper->getFlash('bar', 'foo'));
+        $this->assertEquals(array('bar'), $helper->getFlash('notice'));
+    }
 
-        $this->assertNull($helper->getFlash('foobar'));
-
-        $this->assertEquals(array('foo' => 'bar'), $helper->getFlashes());
+    public function testGetFlashes()
+    {
+        $helper = new SessionHelper($this->requestStack);
+        $this->assertEquals(array('notice' => array('bar')), $helper->getFlashes());
     }
 
     public function testGet()
     {
-        $helper = new SessionHelper($this->request);
+        $helper = new SessionHelper($this->requestStack);
 
         $this->assertEquals('bar', $helper->get('foobar'));
         $this->assertEquals('foo', $helper->get('bar', 'foo'));
@@ -60,16 +65,9 @@ class SessionHelperTest extends \PHPUnit_Framework_TestCase
         $this->assertNull($helper->get('foo'));
     }
 
-    public function testGetLocale()
-    {
-        $helper = new SessionHelper($this->request);
-
-        $this->assertEquals('en', $helper->getLocale());
-    }
-
     public function testGetName()
     {
-        $helper = new SessionHelper($this->request);
+        $helper = new SessionHelper($this->requestStack);
 
         $this->assertEquals('session', $helper->getName());
     }

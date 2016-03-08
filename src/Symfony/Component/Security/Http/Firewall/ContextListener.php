@@ -11,18 +11,17 @@
 
 namespace Symfony\Component\Security\Http\Firewall;
 
-use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpKernel\HttpKernelInterface;
-use Symfony\Component\HttpKernel\Log\LoggerInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpKernel\Event\GetResponseEvent;
 use Symfony\Component\HttpKernel\Event\FilterResponseEvent;
 use Symfony\Component\HttpKernel\KernelEvents;
 use Symfony\Component\Security\Core\Authentication\Token\AnonymousToken;
+use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
 use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
 use Symfony\Component\Security\Core\Exception\UsernameNotFoundException;
 use Symfony\Component\Security\Core\Exception\UnsupportedUserException;
-use Symfony\Component\Security\Core\SecurityContext;
 use Symfony\Component\Security\Core\User\UserInterface;
+use Symfony\Component\Security\Core\User\UserProviderInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 
 /**
@@ -33,116 +32,142 @@ use Symfony\Component\EventDispatcher\EventDispatcherInterface;
  */
 class ContextListener implements ListenerInterface
 {
-    private $context;
+    private $tokenStorage;
     private $contextKey;
+    private $sessionKey;
     private $logger;
     private $userProviders;
+    private $dispatcher;
+    private $registered;
 
-    public function __construct(SecurityContext $context, array $userProviders, $contextKey, LoggerInterface $logger = null, EventDispatcherInterface $dispatcher = null)
+    public function __construct(TokenStorageInterface $tokenStorage, array $userProviders, $contextKey, LoggerInterface $logger = null, EventDispatcherInterface $dispatcher = null)
     {
         if (empty($contextKey)) {
             throw new \InvalidArgumentException('$contextKey must not be empty.');
         }
 
-        $this->context = $context;
+        foreach ($userProviders as $userProvider) {
+            if (!$userProvider instanceof UserProviderInterface) {
+                throw new \InvalidArgumentException(sprintf('User provider "%s" must implement "Symfony\Component\Security\Core\User\UserProviderInterface".', get_class($userProvider)));
+            }
+        }
+
+        $this->tokenStorage = $tokenStorage;
         $this->userProviders = $userProviders;
         $this->contextKey = $contextKey;
+        $this->sessionKey = '_security_'.$contextKey;
         $this->logger = $logger;
-
-        if (null !== $dispatcher) {
-            $dispatcher->addListener(KernelEvents::RESPONSE, array($this, 'onKernelResponse'));
-        }
+        $this->dispatcher = $dispatcher;
     }
 
     /**
-     * Reads the SecurityContext from the session.
+     * Reads the Security Token from the session.
      *
      * @param GetResponseEvent $event A GetResponseEvent instance
      */
     public function handle(GetResponseEvent $event)
     {
-        $request = $event->getRequest();
+        if (!$this->registered && null !== $this->dispatcher && $event->isMasterRequest()) {
+            $this->dispatcher->addListener(KernelEvents::RESPONSE, array($this, 'onKernelResponse'));
+            $this->registered = true;
+        }
 
+        $request = $event->getRequest();
         $session = $request->hasPreviousSession() ? $request->getSession() : null;
 
-        if (null === $session || null === $token = $session->get('_security_'.$this->contextKey)) {
-            $this->context->setToken(null);
-        } else {
-            if (null !== $this->logger) {
-                $this->logger->debug('Read SecurityContext from the session');
-            }
+        if (null === $session || null === $token = $session->get($this->sessionKey)) {
+            $this->tokenStorage->setToken(null);
 
-            $token = unserialize($token);
-
-            if (null !== $token) {
-                $token = $this->refreshUser($token);
-            }
-
-            $this->context->setToken($token);
+            return;
         }
+
+        $token = unserialize($token);
+
+        if (null !== $this->logger) {
+            $this->logger->debug('Read existing security token from the session.', array('key' => $this->sessionKey));
+        }
+
+        if ($token instanceof TokenInterface) {
+            $token = $this->refreshUser($token);
+        } elseif (null !== $token) {
+            if (null !== $this->logger) {
+                $this->logger->warning('Expected a security token from the session, got something else.', array('key' => $this->sessionKey, 'received' => $token));
+            }
+
+            $token = null;
+        }
+
+        $this->tokenStorage->setToken($token);
     }
 
     /**
-     * Writes the SecurityContext to the session.
+     * Writes the security token into the session.
      *
      * @param FilterResponseEvent $event A FilterResponseEvent instance
      */
     public function onKernelResponse(FilterResponseEvent $event)
     {
-        if (HttpKernelInterface::MASTER_REQUEST !== $event->getRequestType()) {
+        if (!$event->isMasterRequest()) {
             return;
         }
 
-        if (null === $token = $this->context->getToken()) {
+        if (!$event->getRequest()->hasSession()) {
             return;
         }
 
-        if (null === $token || $token instanceof AnonymousToken) {
-            return;
-        }
+        $this->dispatcher->removeListener(KernelEvents::RESPONSE, array($this, 'onKernelResponse'));
+        $this->registered = false;
 
-        if (null !== $this->logger) {
-            $this->logger->debug('Write SecurityContext in the session');
-        }
+        $request = $event->getRequest();
+        $session = $request->getSession();
 
-        $event->getRequest()->getSession()->set('_security_'.$this->contextKey, serialize($token));
+        if ((null === $token = $this->tokenStorage->getToken()) || ($token instanceof AnonymousToken)) {
+            if ($request->hasPreviousSession()) {
+                $session->remove($this->sessionKey);
+            }
+        } else {
+            $session->set($this->sessionKey, serialize($token));
+
+            if (null !== $this->logger) {
+                $this->logger->debug('Stored the security token in the session.', array('key' => $this->sessionKey));
+            }
+        }
     }
 
     /**
-     * Refreshes the user by reloading it from the user provider
+     * Refreshes the user by reloading it from the user provider.
      *
      * @param TokenInterface $token
      *
      * @return TokenInterface|null
+     *
+     * @throws \RuntimeException
      */
-    private function refreshUser(TokenInterface $token)
+    protected function refreshUser(TokenInterface $token)
     {
         $user = $token->getUser();
         if (!$user instanceof UserInterface) {
             return $token;
         }
 
-        if (null !== $this->logger) {
-            $this->logger->debug(sprintf('Reloading user from user provider.'));
-        }
-
         foreach ($this->userProviders as $provider) {
             try {
-                $token->setUser($provider->refreshUser($user));
+                $refreshedUser = $provider->refreshUser($user);
+                $token->setUser($refreshedUser);
 
                 if (null !== $this->logger) {
-                    $this->logger->debug(sprintf('Username "%s" was reloaded from user provider.', $user->getUsername()));
+                    $this->logger->debug('User was reloaded from a user provider.', array('username' => $refreshedUser->getUsername(), 'provider' => get_class($provider)));
                 }
 
                 return $token;
-            } catch (UnsupportedUserException $unsupported) {
+            } catch (UnsupportedUserException $e) {
                 // let's try the next user provider
-            } catch (UsernameNotFoundException $notFound) {
+            } catch (UsernameNotFoundException $e) {
                 if (null !== $this->logger) {
-                    $this->logger->warn(sprintf('Username "%s" could not be found.', $user->getUsername()));
+                    $this->logger->warning('Username could not be found in the selected user provider.', array('username' => $e->getUsername(), 'provider' => get_class($provider)));
                 }
 
-                return null;
+                return;
             }
         }
 

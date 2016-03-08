@@ -11,20 +11,19 @@
 
 namespace Symfony\Bundle\FrameworkBundle\Routing;
 
-use Symfony\Component\Routing\Matcher\UrlMatcher;
-use Symfony\Component\Routing\Matcher\RedirectableUrlMatcherInterface;
+use Symfony\Component\Routing\Matcher\RedirectableUrlMatcher as BaseMatcher;
 
 /**
  * @author Fabien Potencier <fabien@symfony.com>
  */
-class RedirectableUrlMatcher extends UrlMatcher implements RedirectableUrlMatcherInterface
+class RedirectableUrlMatcher extends BaseMatcher
 {
     /**
      * Redirects the user to another URL.
      *
-     * @param string  $path   The path info to redirect to.
-     * @param string  $route  The route that matched
-     * @param string  $scheme The URL scheme (null to keep the current one)
+     * @param string $path   The path info to redirect to.
+     * @param string $route  The route that matched
+     * @param string $scheme The URL scheme (null to keep the current one)
      *
      * @return array An array of parameters
      */
@@ -32,12 +31,12 @@ class RedirectableUrlMatcher extends UrlMatcher implements RedirectableUrlMatche
     {
         return array(
             '_controller' => 'Symfony\\Bundle\\FrameworkBundle\\Controller\\RedirectController::urlRedirectAction',
-            'path'        => $path,
-            'permanent'   => true,
-            'scheme'      => $scheme,
-            'httpPort'    => $this->context->getHttpPort(),
-            'httpsPort'   => $this->context->getHttpsPort(),
-            '_route'      => $route,
+            'path' => $path,
+            'permanent' => true,
+            'scheme' => $scheme,
+            'httpPort' => $this->context->getHttpPort(),
+            'httpsPort' => $this->context->getHttpsPort(),
+            '_route' => $route,
         );
     }
 }

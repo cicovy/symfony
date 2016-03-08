@@ -14,8 +14,9 @@ namespace Symfony\Bundle\FrameworkBundle\Tests\Templating;
 use Symfony\Bundle\FrameworkBundle\Templating\PhpEngine;
 use Symfony\Component\DependencyInjection\Container;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Session;
-use Symfony\Component\HttpFoundation\SessionStorage\ArraySessionStorage;
+use Symfony\Component\HttpFoundation\RequestStack;
+use Symfony\Component\HttpFoundation\Session\Session;
+use Symfony\Component\HttpFoundation\Session\Storage\MockArraySessionStorage;
 use Symfony\Component\Templating\TemplateNameParser;
 use Symfony\Bundle\FrameworkBundle\Templating\GlobalVariables;
 use Symfony\Bundle\FrameworkBundle\Tests\TestCase;
@@ -37,7 +38,7 @@ class PhpEngineTest extends TestCase
         $loader = $this->getMockForAbstractClass('Symfony\Component\Templating\Loader\Loader');
         $engine = new PhpEngine(new TemplateNameParser(), $container, $loader, new GlobalVariables($container));
 
-        $container->set('request', null);
+        $container->set('request_stack', null);
 
         $globals = $engine->getGlobals();
         $this->assertEmpty($globals['app']->getRequest());
@@ -63,11 +64,13 @@ class PhpEngineTest extends TestCase
     protected function getContainer()
     {
         $container = new Container();
+        $session = new Session(new MockArraySessionStorage());
         $request = new Request();
-        $session = new Session(new ArraySessionStorage());
+        $stack = new RequestStack();
+        $stack->push($request);
 
         $request->setSession($session);
-        $container->set('request', $request);
+        $container->set('request_stack', $stack);
 
         return $container;
     }

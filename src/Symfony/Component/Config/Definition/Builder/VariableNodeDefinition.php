@@ -11,7 +11,6 @@
 
 namespace Symfony\Component\Config\Definition\Builder;
 
-use Symfony\Component\Config\Definition\NodeInterface;
 use Symfony\Component\Config\Definition\VariableNode;
 
 /**
@@ -22,7 +21,7 @@ use Symfony\Component\Config\Definition\VariableNode;
 class VariableNodeDefinition extends NodeDefinition
 {
     /**
-     * Instantiate a Node
+     * Instantiate a Node.
      *
      * @return VariableNode The node
      */
@@ -32,7 +31,7 @@ class VariableNodeDefinition extends NodeDefinition
     }
 
     /**
-     * {@inheritDoc}
+     * {@inheritdoc}
      */
     protected function createNode()
     {
@@ -50,10 +49,7 @@ class VariableNodeDefinition extends NodeDefinition
             $node->setDefaultValue($this->defaultValue);
         }
 
-        if (false === $this->allowEmptyValue) {
-            $node->setAllowEmptyValue($this->allowEmptyValue);
-        }
-
+        $node->setAllowEmptyValue($this->allowEmptyValue);
         $node->addEquivalentValue(null, $this->nullEquivalent);
         $node->addEquivalentValue(true, $this->trueEquivalent);
         $node->addEquivalentValue(false, $this->falseEquivalent);
@@ -65,5 +61,4 @@ class VariableNodeDefinition extends NodeDefinition
 
         return $node;
     }
-
 }

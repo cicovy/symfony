@@ -11,24 +11,31 @@
 
 namespace Symfony\Bundle\FrameworkBundle\Translation;
 
+use Symfony\Component\HttpKernel\CacheWarmer\WarmableInterface;
 use Symfony\Component\Translation\Translator as BaseTranslator;
-use Symfony\Component\Translation\Loader\LoaderInterface;
 use Symfony\Component\Translation\MessageSelector;
 use Symfony\Component\DependencyInjection\ContainerInterface;
-use Symfony\Component\HttpFoundation\Session;
-use Symfony\Component\Config\ConfigCache;
 
 /**
  * Translator.
  *
  * @author Fabien Potencier <fabien@symfony.com>
  */
-class Translator extends BaseTranslator
+class Translator extends BaseTranslator implements WarmableInterface
 {
     protected $container;
-    protected $options;
-    protected $session;
     protected $loaderIds;
+
+    protected $options = array(
+        'cache_dir' => null,
+        'debug' => false,
+        'resource_files' => array(),
+    );
+
+    /**
+     * @var array
+     */
+    private $resourceLocales;
 
     /**
      * Constructor.
@@ -37,25 +44,19 @@ class Translator extends BaseTranslator
      *
      *   * cache_dir: The cache directory (or null to disable caching)
      *   * debug:     Whether to enable debugging or not (false by default)
+     *   * resource_files: List of translation resources available grouped by locale.
      *
      * @param ContainerInterface $container A ContainerInterface instance
      * @param MessageSelector    $selector  The message selector for pluralization
      * @param array              $loaderIds An array of loader Ids
      * @param array              $options   An array of options
-     * @param Session            $session   A Session instance
+     *
+     * @throws \InvalidArgumentException
      */
-    public function __construct(ContainerInterface $container, MessageSelector $selector, $loaderIds = array(), array $options = array(), Session $session = null)
+    public function __construct(ContainerInterface $container, MessageSelector $selector, $loaderIds = array(), array $options = array())
     {
-        parent::__construct(null, $selector);
-
-        $this->session = $session;
         $this->container = $container;
         $this->loaderIds = $loaderIds;
-
-        $this->options = array(
-            'cache_dir' => null,
-            'debug'     => false,
-        );
 
         // check option names
         if ($diff = array_diff(array_keys($options), array_keys($this->options))) {
@@ -63,59 +64,63 @@ class Translator extends BaseTranslator
         }
 
         $this->options = array_merge($this->options, $options);
+        $this->resourceLocales = array_keys($this->options['resource_files']);
+        if (null !== $this->options['cache_dir'] && $this->options['debug']) {
+            $this->loadResources();
+        }
+
+        parent::__construct($container->getParameter('kernel.default_locale'), $selector, $this->options['cache_dir'], $this->options['debug']);
     }
 
     /**
      * {@inheritdoc}
      */
-    public function getLocale()
+    public function warmUp($cacheDir)
     {
-        if (null === $this->locale && null !== $this->session) {
-            $this->locale = $this->session->getLocale();
-        }
-
-        return $this->locale;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    protected function loadCatalogue($locale)
-    {
-        if (isset($this->catalogues[$locale])) {
-            return;
-        }
-
+        // skip warmUp when translator doesn't use cache
         if (null === $this->options['cache_dir']) {
-            $this->initialize();
-
-            return parent::loadCatalogue($locale);
-        }
-
-        $cache = new ConfigCache($this->options['cache_dir'].'/catalogue.'.$locale.'.php', $this->options['debug']);
-        if (!$cache->isFresh()) {
-            $this->initialize();
-
-            parent::loadCatalogue($locale);
-
-            $content = sprintf(
-                "<?php use Symfony\Component\Translation\MessageCatalogue; return new MessageCatalogue('%s', %s);",
-                $locale,
-                var_export($this->catalogues[$locale]->all(), true)
-            );
-
-            $cache->write($content, $this->catalogues[$locale]->getResources());
-
             return;
         }
 
-        $this->catalogues[$locale] = include $cache;
+        $locales = array_merge($this->getFallbackLocales(), array($this->getLocale()), $this->resourceLocales);
+        foreach (array_unique($locales) as $locale) {
+            // reset catalogue in case it's already loaded during the dump of the other locales.
+            if (isset($this->catalogues[$locale])) {
+                unset($this->catalogues[$locale]);
+            }
+
+            $this->loadCatalogue($locale);
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    protected function initializeCatalogue($locale)
+    {
+        $this->initialize();
+        parent::initializeCatalogue($locale);
     }
 
     protected function initialize()
     {
-        foreach ($this->loaderIds as $id => $alias) {
-            $this->addLoader($alias, $this->container->get($id));
+        $this->loadResources();
+        foreach ($this->loaderIds as $id => $aliases) {
+            foreach ($aliases as $alias) {
+                $this->addLoader($alias, $this->container->get($id));
+            }
+        }
+    }
+
+    private function loadResources()
+    {
+        foreach ($this->options['resource_files'] as $locale => $files) {
+            foreach ($files as $key => $file) {
+                // filename is domain.locale.format
+                list($domain, $locale, $format) = explode('.', basename($file), 3);
+                $this->addResource($format, $file, $locale, $domain);
+                unset($this->options['resource_files'][$locale][$key]);
+            }
         }
     }
 }

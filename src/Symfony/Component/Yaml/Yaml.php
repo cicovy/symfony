@@ -17,63 +17,66 @@ use Symfony\Component\Yaml\Exception\ParseException;
  * Yaml offers convenience methods to load and dump YAML.
  *
  * @author Fabien Potencier <fabien@symfony.com>
- *
- * @api
  */
 class Yaml
 {
+    const DUMP_OBJECT = 1;
+    const PARSE_EXCEPTION_ON_INVALID_TYPE = 2;
+    const PARSE_OBJECT = 4;
+    const PARSE_OBJECT_FOR_MAP = 8;
+    const DUMP_EXCEPTION_ON_INVALID_TYPE = 16;
+    const PARSE_DATETIME = 32;
+    const DUMP_BASE64_BINARY_DATA = 64;
+    const DUMP_OBJECT_AS_MAP = 128;
+    const DUMP_MULTI_LINE_LITERAL_BLOCK = 256;
+
     /**
-     * Parses YAML into a PHP array.
-     *
-     * The parse method, when supplied with a YAML stream (string or file),
-     * will do its best to convert YAML in a file into a PHP array.
+     * Parses YAML into a PHP value.
      *
      *  Usage:
      *  <code>
-     *   $array = Yaml::parse('config.yml');
+     *   $array = Yaml::parse(file_get_contents('config.yml'));
      *   print_r($array);
      *  </code>
      *
-     * @param string $input Path to a YAML file or a string containing YAML
+     * @param string $input A string containing YAML
+     * @param int    $flags A bit field of PARSE_* constants to customize the YAML parser behavior
      *
-     * @return array The YAML converted to a PHP array
+     * @return mixed The YAML converted to a PHP value
      *
-     * @throws \InvalidArgumentException If the YAML is not valid
-     *
-     * @api
+     * @throws ParseException If the YAML is not valid
      */
-    static public function parse($input)
+    public static function parse($input, $flags = 0)
     {
-        $file = '';
+        if (is_bool($flags)) {
+            @trigger_error('Passing a boolean flag to toggle exception handling is deprecated since version 3.1 and will be removed in 4.0. Use the PARSE_EXCEPTION_ON_INVALID_TYPE flag instead.', E_USER_DEPRECATED);
 
-        // if input is a file, process it
-        if (strpos($input, "\n") === false && is_file($input) && is_readable($input)) {
-            $file = $input;
-
-            ob_start();
-            $retval = include($input);
-            $content = ob_get_clean();
-
-            // if an array is returned by the config file assume it's in plain php form else in YAML
-            $input = is_array($retval) ? $retval : $content;
+            if ($flags) {
+                $flags = self::PARSE_EXCEPTION_ON_INVALID_TYPE;
+            } else {
+                $flags = 0;
+            }
         }
 
-        // if an array is returned by the config file assume it's in plain php form else in YAML
-        if (is_array($input)) {
-            return $input;
+        if (func_num_args() >= 3) {
+            @trigger_error('Passing a boolean flag to toggle object support is deprecated since version 3.1 and will be removed in 4.0. Use the PARSE_OBJECT flag instead.', E_USER_DEPRECATED);
+
+            if (func_get_arg(2)) {
+                $flags |= self::PARSE_OBJECT;
+            }
+        }
+
+        if (func_num_args() >= 4) {
+            @trigger_error('Passing a boolean flag to toggle object for map support is deprecated since version 3.1 and will be removed in 4.0. Use the Yaml::PARSE_OBJECT_FOR_MAP flag instead.', E_USER_DEPRECATED);
+
+            if (func_get_arg(3)) {
+                $flags |= self::PARSE_OBJECT_FOR_MAP;
+            }
         }
 
         $yaml = new Parser();
 
-        try {
-            return $yaml->parse($input);
-        } catch (ParseException $e) {
-            if ($file) {
-                $e->setParsedFile($file);
-            }
-
-            throw $e;
-        }
+        return $yaml->parse($input, $flags);
     }
 
     /**
@@ -82,17 +85,35 @@ class Yaml
      * The dump method, when supplied with an array, will do its best
      * to convert the array into friendly YAML.
      *
-     * @param array   $array PHP array
-     * @param integer $inline The level where you switch to inline YAML
+     * @param array $array  PHP array
+     * @param int   $inline The level where you switch to inline YAML
+     * @param int   $indent The amount of spaces to use for indentation of nested nodes.
+     * @param int   $flags  A bit field of DUMP_* constants to customize the dumped YAML string
      *
      * @return string A YAML string representing the original PHP array
-     *
-     * @api
      */
-    static public function dump($array, $inline = 2)
+    public static function dump($array, $inline = 2, $indent = 4, $flags = 0)
     {
-        $yaml = new Dumper();
+        if (is_bool($flags)) {
+            @trigger_error('Passing a boolean flag to toggle exception handling is deprecated since version 3.1 and will be removed in 4.0. Use the DUMP_EXCEPTION_ON_INVALID_TYPE flag instead.', E_USER_DEPRECATED);
 
-        return $yaml->dump($array, $inline);
+            if ($flags) {
+                $flags = self::DUMP_EXCEPTION_ON_INVALID_TYPE;
+            } else {
+                $flags = 0;
+            }
+        }
+
+        if (func_num_args() >= 5) {
+            @trigger_error('Passing a boolean flag to toggle object support is deprecated since version 3.1 and will be removed in 4.0. Use the DUMP_OBJECT flag instead.', E_USER_DEPRECATED);
+
+            if (func_get_arg(4)) {
+                $flags |= self::DUMP_OBJECT;
+            }
+        }
+
+        $yaml = new Dumper($indent);
+
+        return $yaml->dump($array, $inline, 0, $flags);
     }
 }

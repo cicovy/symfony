@@ -11,43 +11,49 @@
 
 namespace Symfony\Component\HttpKernel\EventListener;
 
-use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpKernel\HttpKernelInterface;
-use Symfony\Component\HttpKernel\Event\GetResponseEvent;
 use Symfony\Component\HttpKernel\Event\GetResponseForExceptionEvent;
 use Symfony\Component\HttpKernel\Event\FilterResponseEvent;
+use Symfony\Component\HttpKernel\Event\PostResponseEvent;
+use Symfony\Component\HttpKernel\KernelEvents;
 use Symfony\Component\HttpKernel\Profiler\Profiler;
 use Symfony\Component\HttpFoundation\RequestMatcherInterface;
+use Symfony\Component\HttpFoundation\RequestStack;
+use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
- * ProfilerListener collects data for the current request by listening to the onKernelResponse event.
+ * ProfilerListener collects data for the current request by listening to the kernel events.
  *
  * @author Fabien Potencier <fabien@symfony.com>
  */
-class ProfilerListener
+class ProfilerListener implements EventSubscriberInterface
 {
     protected $profiler;
     protected $matcher;
     protected $onlyException;
     protected $onlyMasterRequests;
     protected $exception;
-    protected $children;
+    protected $profiles;
+    protected $requestStack;
+    protected $parents;
 
     /**
      * Constructor.
      *
-     * @param Profiler                $profiler           A Profiler instance
-     * @param RequestMatcherInterface $matcher            A RequestMatcher instance
-     * @param Boolean                 $onlyException      true if the profiler only collects data when an exception occurs, false otherwise
-     * @param Boolean                 $onlyMasterRequests true if the profiler only collects data when the request is a master request, false otherwise
+     * @param Profiler                     $profiler           A Profiler instance
+     * @param RequestStack                 $requestStack       A RequestStack instance
+     * @param RequestMatcherInterface|null $matcher            A RequestMatcher instance
+     * @param bool                         $onlyException      true if the profiler only collects data when an exception occurs, false otherwise
+     * @param bool                         $onlyMasterRequests true if the profiler only collects data when the request is a master request, false otherwise
      */
-    public function __construct(Profiler $profiler, RequestMatcherInterface $matcher = null, $onlyException = false, $onlyMasterRequests = false)
+    public function __construct(Profiler $profiler, RequestStack $requestStack, RequestMatcherInterface $matcher = null, $onlyException = false, $onlyMasterRequests = false)
     {
         $this->profiler = $profiler;
         $this->matcher = $matcher;
-        $this->onlyException = (Boolean) $onlyException;
-        $this->onlyMasterRequests = (Boolean) $onlyMasterRequests;
-        $this->children = array();
+        $this->onlyException = (bool) $onlyException;
+        $this->onlyMasterRequests = (bool) $onlyMasterRequests;
+        $this->profiles = new \SplObjectStorage();
+        $this->parents = new \SplObjectStorage();
+        $this->requestStack = $requestStack;
     }
 
     /**
@@ -57,7 +63,7 @@ class ProfilerListener
      */
     public function onKernelException(GetResponseForExceptionEvent $event)
     {
-        if ($this->onlyMasterRequests && HttpKernelInterface::MASTER_REQUEST !== $event->getRequestType()) {
+        if ($this->onlyMasterRequests && !$event->isMasterRequest()) {
             return;
         }
 
@@ -71,7 +77,7 @@ class ProfilerListener
      */
     public function onKernelResponse(FilterResponseEvent $event)
     {
-        $master = HttpKernelInterface::MASTER_REQUEST === $event->getRequestType();
+        $master = $event->isMasterRequest();
         if ($this->onlyMasterRequests && !$master) {
             return;
         }
@@ -80,24 +86,50 @@ class ProfilerListener
             return;
         }
 
+        $request = $event->getRequest();
         $exception = $this->exception;
         $this->exception = null;
 
-        if (null !== $this->matcher && !$this->matcher->matches($event->getRequest())) {
+        if (null !== $this->matcher && !$this->matcher->matches($request)) {
             return;
         }
 
-        if ($profile = $this->profiler->collect($event->getRequest(), $event->getResponse(), $exception)) {
-            if ($master) {
-                $this->profiler->saveProfile($profile);
-                foreach ($this->children as $child) {
-                    $child->setParent($profile);
-                    $this->profiler->saveProfile($child);
+        if (!$profile = $this->profiler->collect($request, $event->getResponse(), $exception)) {
+            return;
+        }
+
+        $this->profiles[$request] = $profile;
+
+        $this->parents[$request] = $this->requestStack->getParentRequest();
+    }
+
+    public function onKernelTerminate(PostResponseEvent $event)
+    {
+        // attach children to parents
+        foreach ($this->profiles as $request) {
+            // isset call should be removed when requestStack is required
+            if (isset($this->parents[$request]) && null !== $parentRequest = $this->parents[$request]) {
+                if (isset($this->profiles[$parentRequest])) {
+                    $this->profiles[$parentRequest]->addChild($this->profiles[$request]);
                 }
-                $this->children = array();
-            } else {
-                $this->children[] = $profile;
             }
         }
+
+        // save profiles
+        foreach ($this->profiles as $request) {
+            $this->profiler->saveProfile($this->profiles[$request]);
+        }
+
+        $this->profiles = new \SplObjectStorage();
+        $this->parents = new \SplObjectStorage();
+    }
+
+    public static function getSubscribedEvents()
+    {
+        return array(
+            KernelEvents::RESPONSE => array('onKernelResponse', -100),
+            KernelEvents::EXCEPTION => 'onKernelException',
+            KernelEvents::TERMINATE => array('onKernelTerminate', -1024),
+        );
     }
 }

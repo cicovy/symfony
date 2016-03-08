@@ -12,21 +12,24 @@
 namespace Symfony\Component\Form\Extension\Core\Type;
 
 use Symfony\Component\Form\AbstractType;
+use Symfony\Component\OptionsResolver\OptionsResolver;
 
 class TextType extends AbstractType
 {
     /**
      * {@inheritdoc}
      */
-    public function getParent(array $options)
+    public function configureOptions(OptionsResolver $resolver)
     {
-        return 'field';
+        $resolver->setDefaults(array(
+            'compound' => false,
+        ));
     }
 
     /**
      * {@inheritdoc}
      */
-    public function getName()
+    public function getBlockPrefix()
     {
         return 'text';
     }

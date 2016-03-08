@@ -1,18 +1,17 @@
 <?php
 
 /*
- * This file is part of the Symfony framework.
+ * This file is part of the Symfony package.
  *
  * (c) Fabien Potencier <fabien@symfony.com>
  *
- * This source file is subject to the MIT license that is bundled
- * with this source code in the file LICENSE.
+ * For the full copyright and license information, please view the LICENSE
+ * file that was distributed with this source code.
  */
 
 namespace Symfony\Component\DependencyInjection\Compiler;
 
 use Symfony\Component\DependencyInjection\Definition;
-
 use Symfony\Component\DependencyInjection\Exception\ServiceNotFoundException;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DependencyInjection\Reference;
@@ -50,9 +49,9 @@ class CheckExceptionOnInvalidReferenceBehaviorPass implements CompilerPassInterf
         foreach ($arguments as $argument) {
             if (is_array($argument)) {
                 $this->processReferences($argument);
-            } else if ($argument instanceof Definition) {
+            } elseif ($argument instanceof Definition) {
                 $this->processDefinition($argument);
-            } else if ($argument instanceof Reference && ContainerInterface::EXCEPTION_ON_INVALID_REFERENCE === $argument->getInvalidBehavior()) {
+            } elseif ($argument instanceof Reference && ContainerInterface::EXCEPTION_ON_INVALID_REFERENCE === $argument->getInvalidBehavior()) {
                 $destId = (string) $argument;
 
                 if (!$this->container->has($destId)) {

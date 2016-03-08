@@ -18,15 +18,15 @@ class EmailType extends AbstractType
     /**
      * {@inheritdoc}
      */
-    public function getParent(array $options)
+    public function getParent()
     {
-        return 'field';
+        return __NAMESPACE__.'\TextType';
     }
 
     /**
      * {@inheritdoc}
      */
-    public function getName()
+    public function getBlockPrefix()
     {
         return 'email';
     }

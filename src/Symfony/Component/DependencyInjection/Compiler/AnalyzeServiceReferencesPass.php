@@ -36,17 +36,18 @@ class AnalyzeServiceReferencesPass implements RepeatablePassInterface
     /**
      * Constructor.
      *
-     * @param Boolean $onlyConstructorArguments Sets this Service Reference pass to ignore method calls
+     * @param bool $onlyConstructorArguments Sets this Service Reference pass to ignore method calls
      */
     public function __construct($onlyConstructorArguments = false)
     {
-        $this->onlyConstructorArguments = (Boolean) $onlyConstructorArguments;
+        $this->onlyConstructorArguments = (bool) $onlyConstructorArguments;
     }
 
     /**
-     * {@inheritDoc}
+     * {@inheritdoc}
      */
-    public function setRepeatedPass(RepeatedPass $repeatedPass) {
+    public function setRepeatedPass(RepeatedPass $repeatedPass)
+    {
         $this->repeatedPass = $repeatedPass;
     }
 
@@ -58,7 +59,7 @@ class AnalyzeServiceReferencesPass implements RepeatablePassInterface
     public function process(ContainerBuilder $container)
     {
         $this->container = $container;
-        $this->graph     = $container->getCompiler()->getServiceReferenceGraph();
+        $this->graph = $container->getCompiler()->getServiceReferenceGraph();
         $this->graph->clear();
 
         foreach ($container->getDefinitions() as $id => $definition) {
@@ -68,11 +69,18 @@ class AnalyzeServiceReferencesPass implements RepeatablePassInterface
 
             $this->currentId = $id;
             $this->currentDefinition = $definition;
+
             $this->processArguments($definition->getArguments());
+            if (is_array($definition->getFactory())) {
+                $this->processArguments($definition->getFactory());
+            }
 
             if (!$this->onlyConstructorArguments) {
                 $this->processArguments($definition->getMethodCalls());
                 $this->processArguments($definition->getProperties());
+                if ($definition->getConfigurator()) {
+                    $this->processArguments(array($definition->getConfigurator()));
+                }
             }
         }
 
@@ -91,7 +99,7 @@ class AnalyzeServiceReferencesPass implements RepeatablePassInterface
         foreach ($arguments as $argument) {
             if (is_array($argument)) {
                 $this->processArguments($argument);
-            } else if ($argument instanceof Reference) {
+            } elseif ($argument instanceof Reference) {
                 $this->graph->connect(
                     $this->currentId,
                     $this->currentDefinition,
@@ -99,10 +107,14 @@ class AnalyzeServiceReferencesPass implements RepeatablePassInterface
                     $this->getDefinition((string) $argument),
                     $argument
                 );
-            } else if ($argument instanceof Definition) {
+            } elseif ($argument instanceof Definition) {
                 $this->processArguments($argument->getArguments());
                 $this->processArguments($argument->getMethodCalls());
                 $this->processArguments($argument->getProperties());
+
+                if (is_array($argument->getFactory())) {
+                    $this->processArguments($argument->getFactory());
+                }
             }
         }
     }
@@ -111,7 +123,8 @@ class AnalyzeServiceReferencesPass implements RepeatablePassInterface
      * Returns a service definition given the full name or an alias.
      *
      * @param string $id A full id or alias for a service definition.
-     * @return Definition The definition related to the supplied id
+     *
+     * @return Definition|null The definition related to the supplied id
      */
     private function getDefinition($id)
     {
@@ -127,7 +140,7 @@ class AnalyzeServiceReferencesPass implements RepeatablePassInterface
         }
 
         if (!$this->container->hasDefinition($id)) {
-            return null;
+            return;
         }
 
         return $id;

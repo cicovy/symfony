@@ -23,12 +23,11 @@ use Symfony\Component\HttpFoundation\Request;
 class SessionLogoutHandler implements LogoutHandlerInterface
 {
     /**
-     * Invalidate the current session
+     * Invalidate the current session.
      *
      * @param Request        $request
      * @param Response       $response
      * @param TokenInterface $token
-     * @return void
      */
     public function logout(Request $request, Response $response, TokenInterface $token)
     {

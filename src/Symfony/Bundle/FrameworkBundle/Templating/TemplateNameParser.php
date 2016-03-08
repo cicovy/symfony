@@ -11,9 +11,9 @@
 
 namespace Symfony\Bundle\FrameworkBundle\Templating;
 
-use Symfony\Component\Templating\TemplateNameParser as BaseTemplateNameParser;
 use Symfony\Component\Templating\TemplateReferenceInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
+use Symfony\Component\Templating\TemplateNameParser as BaseTemplateNameParser;
 
 /**
  * TemplateNameParser converts template names from the short notation
@@ -25,7 +25,7 @@ use Symfony\Component\HttpKernel\KernelInterface;
 class TemplateNameParser extends BaseTemplateNameParser
 {
     protected $kernel;
-    protected $cache;
+    protected $cache = array();
 
     /**
      * Constructor.
@@ -35,7 +35,6 @@ class TemplateNameParser extends BaseTemplateNameParser
     public function __construct(KernelInterface $kernel)
     {
         $this->kernel = $kernel;
-        $this->cache = array();
     }
 
     /**
@@ -45,30 +44,22 @@ class TemplateNameParser extends BaseTemplateNameParser
     {
         if ($name instanceof TemplateReferenceInterface) {
             return $name;
-        } else if (isset($this->cache[$name])) {
+        } elseif (isset($this->cache[$name])) {
             return $this->cache[$name];
         }
 
         // normalize name
-        $name = str_replace(':/', ':', preg_replace('#/{2,}#', '/', strtr($name, '\\', '/')));
+        $name = str_replace(':/', ':', preg_replace('#/{2,}#', '/', str_replace('\\', '/', $name)));
 
         if (false !== strpos($name, '..')) {
             throw new \RuntimeException(sprintf('Template name "%s" contains invalid characters.', $name));
         }
 
-        $parts = explode(':', $name);
-        if (3 !== count($parts)) {
-            throw new \InvalidArgumentException(sprintf('Template name "%s" is not valid (format is "bundle:section:template.format.engine").', $name));
+        if (!preg_match('/^(?:([^:]*):([^:]*):)?(.+)\.([^\.]+)\.([^\.]+)$/', $name, $matches) || $this->isAbsolutePath($name) || 0 === strpos($name, '@')) {
+            return parent::parse($name);
         }
 
-        $elements = explode('.', $parts[2]);
-        if (3 > count($elements)) {
-            throw new \InvalidArgumentException(sprintf('Template name "%s" is not valid (format is "bundle:section:template.format.engine").', $name));
-        }
-        $engine = array_pop($elements);
-        $format = array_pop($elements);
-
-        $template = new TemplateReference($parts[0], $parts[1], implode('.', $elements), $format, $engine);
+        $template = new TemplateReference($matches[1], $matches[2], $matches[3], $matches[4], $matches[5]);
 
         if ($template->get('bundle')) {
             try {
@@ -81,25 +72,8 @@ class TemplateNameParser extends BaseTemplateNameParser
         return $this->cache[$name] = $template;
     }
 
-    /**
-     * Convert a filename to a template.
-     *
-     * @param string $file The filename
-     *
-     * @return TemplateReferenceInterface A template
-     */
-    public function parseFromFilename($file)
+    private function isAbsolutePath($file)
     {
-        $parts = explode('/', strtr($file, '\\', '/'));
-
-        $elements = explode('.', array_pop($parts));
-        if (3 > count($elements)) {
-            return false;
-        }
-        $engine = array_pop($elements);
-        $format = array_pop($elements);
-
-        return new TemplateReference('', implode('/', $parts), implode('.', $elements), $format, $engine);
+        return (bool) preg_match('#^(?:/|[a-zA-Z]:)#', $file);
     }
-
 }

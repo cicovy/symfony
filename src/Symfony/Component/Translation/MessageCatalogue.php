@@ -17,34 +17,30 @@ use Symfony\Component\Config\Resource\ResourceInterface;
  * MessageCatalogue.
  *
  * @author Fabien Potencier <fabien@symfony.com>
- *
- * @api
  */
-class MessageCatalogue implements MessageCatalogueInterface
+class MessageCatalogue implements MessageCatalogueInterface, MetadataAwareInterface
 {
     private $messages = array();
+    private $metadata = array();
+    private $resources = array();
     private $locale;
-    private $resources;
+    private $fallbackCatalogue;
+    private $parent;
 
     /**
      * Constructor.
      *
      * @param string $locale   The locale
      * @param array  $messages An array of messages classified by domain
-     *
-     * @api
      */
     public function __construct($locale, array $messages = array())
     {
         $this->locale = $locale;
         $this->messages = $messages;
-        $this->resources = array();
     }
 
     /**
      * {@inheritdoc}
-     *
-     * @api
      */
     public function getLocale()
     {
@@ -53,8 +49,6 @@ class MessageCatalogue implements MessageCatalogueInterface
 
     /**
      * {@inheritdoc}
-     *
-     * @api
      */
     public function getDomains()
     {
@@ -63,8 +57,6 @@ class MessageCatalogue implements MessageCatalogueInterface
 
     /**
      * {@inheritdoc}
-     *
-     * @api
      */
     public function all($domain = null)
     {
@@ -77,8 +69,6 @@ class MessageCatalogue implements MessageCatalogueInterface
 
     /**
      * {@inheritdoc}
-     *
-     * @api
      */
     public function set($id, $translation, $domain = 'messages')
     {
@@ -87,28 +77,46 @@ class MessageCatalogue implements MessageCatalogueInterface
 
     /**
      * {@inheritdoc}
-     *
-     * @api
      */
     public function has($id, $domain = 'messages')
+    {
+        if (isset($this->messages[$domain][$id])) {
+            return true;
+        }
+
+        if (null !== $this->fallbackCatalogue) {
+            return $this->fallbackCatalogue->has($id, $domain);
+        }
+
+        return false;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function defines($id, $domain = 'messages')
     {
         return isset($this->messages[$domain][$id]);
     }
 
     /**
      * {@inheritdoc}
-     *
-     * @api
      */
     public function get($id, $domain = 'messages')
     {
-        return isset($this->messages[$domain][$id]) ? $this->messages[$domain][$id] : $id;
+        if (isset($this->messages[$domain][$id])) {
+            return $this->messages[$domain][$id];
+        }
+
+        if (null !== $this->fallbackCatalogue) {
+            return $this->fallbackCatalogue->get($id, $domain);
+        }
+
+        return $id;
     }
 
     /**
      * {@inheritdoc}
-     *
-     * @api
      */
     public function replace($messages, $domain = 'messages')
     {
@@ -119,8 +127,6 @@ class MessageCatalogue implements MessageCatalogueInterface
 
     /**
      * {@inheritdoc}
-     *
-     * @api
      */
     public function add($messages, $domain = 'messages')
     {
@@ -133,8 +139,6 @@ class MessageCatalogue implements MessageCatalogueInterface
 
     /**
      * {@inheritdoc}
-     *
-     * @api
      */
     public function addCatalogue(MessageCatalogueInterface $catalogue)
     {
@@ -149,22 +153,35 @@ class MessageCatalogue implements MessageCatalogueInterface
         foreach ($catalogue->getResources() as $resource) {
             $this->addResource($resource);
         }
+
+        if ($catalogue instanceof MetadataAwareInterface) {
+            $metadata = $catalogue->getMetadata('', '');
+            $this->addMetadata($metadata);
+        }
     }
 
     /**
      * {@inheritdoc}
-     *
-     * @api
      */
     public function addFallbackCatalogue(MessageCatalogueInterface $catalogue)
     {
-        foreach ($catalogue->getDomains() as $domain) {
-            foreach ($catalogue->all($domain) as $id => $translation) {
-                if (false === $this->has($id, $domain)) {
-                    $this->set($id, $translation, $domain);
-                }
+        // detect circular references
+        $c = $catalogue;
+        while ($c = $c->getFallbackCatalogue()) {
+            if ($c->getLocale() === $this->getLocale()) {
+                throw new \LogicException(sprintf('Circular reference detected when adding a fallback catalogue for locale "%s".', $catalogue->getLocale()));
             }
         }
+
+        $c = $this;
+        do {
+            if ($c->getLocale() === $catalogue->getLocale()) {
+                throw new \LogicException(sprintf('Circular reference detected when adding a fallback catalogue for locale "%s".', $catalogue->getLocale()));
+            }
+        } while ($c = $c->parent);
+
+        $catalogue->parent = $this;
+        $this->fallbackCatalogue = $catalogue;
 
         foreach ($catalogue->getResources() as $resource) {
             $this->addResource($resource);
@@ -173,21 +190,81 @@ class MessageCatalogue implements MessageCatalogueInterface
 
     /**
      * {@inheritdoc}
-     *
-     * @api
      */
-    public function getResources()
+    public function getFallbackCatalogue()
     {
-        return array_values(array_unique($this->resources));
+        return $this->fallbackCatalogue;
     }
 
     /**
      * {@inheritdoc}
-     *
-     * @api
+     */
+    public function getResources()
+    {
+        return array_values($this->resources);
+    }
+
+    /**
+     * {@inheritdoc}
      */
     public function addResource(ResourceInterface $resource)
     {
-        $this->resources[] = $resource;
+        $this->resources[$resource->__toString()] = $resource;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getMetadata($key = '', $domain = 'messages')
+    {
+        if ('' == $domain) {
+            return $this->metadata;
+        }
+
+        if (isset($this->metadata[$domain])) {
+            if ('' == $key) {
+                return $this->metadata[$domain];
+            }
+
+            if (isset($this->metadata[$domain][$key])) {
+                return $this->metadata[$domain][$key];
+            }
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function setMetadata($key, $value, $domain = 'messages')
+    {
+        $this->metadata[$domain][$key] = $value;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function deleteMetadata($key = '', $domain = 'messages')
+    {
+        if ('' == $domain) {
+            $this->metadata = array();
+        } elseif ('' == $key) {
+            unset($this->metadata[$domain]);
+        } else {
+            unset($this->metadata[$domain][$key]);
+        }
+    }
+
+    /**
+     * Adds current values with the new values.
+     *
+     * @param array $values Values to add
+     */
+    private function addMetadata(array $values)
+    {
+        foreach ($values as $domain => $keys) {
+            foreach ($keys as $key => $value) {
+                $this->setMetadata($key, $value, $domain);
+            }
+        }
     }
 }
